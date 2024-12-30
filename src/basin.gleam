@@ -2,8 +2,16 @@ import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/otp/actor
 
-pub type Basin(resource, a) {
-  Basin(then: fn(fn(resource) -> a) -> a)
+pub opaque type Basin(resource, a) {
+  Basin(
+    // next: fn(fn(resource) -> a) -> a,
+    pool: Subject(Message(resource)),
+    //  janitor: Subject(JanitorMessage(resource))
+  )
+}
+
+pub type BasinError(resource) {
+  ProcessCallError(call_error: process.CallError(resource))
 }
 
 type ProvisionedResource(resource) {
@@ -17,34 +25,49 @@ type Message(resource) {
   Release(resource: resource)
 }
 
-// type PoolState(resource) {
-//   PoolState(resources: List(ProvisionedResource(resource)))
-// }
+pub fn next(
+  basin: Basin(resource, a),
+  resource_callback: fn(resource) -> a,
+) -> Result(a, BasinError(resource)) {
+  use_resource(basin.pool, resource_callback)
+}
 
-pub fn new(idle_lifetime: Int, initializer: fn() -> resource) {
+pub fn new(
+  idle_lifetime: Int,
+  initializer: fn() -> resource,
+  usage: fn(Basin(resource, b)) -> a,
+) -> a {
   let assert Ok(pool) = actor.start([], create_pool_handler(initializer))
   // let assert Ok(janitor) = actor.start([], create_janitor(idle_lifetime, pool))
 
-  Basin(fn(callback) { use_resource(pool, callback) })
+  let result = usage(Basin(pool))
+
+  // shut down the actor
+  process.send(pool, Shutdown)
+
+  result
 }
 
 fn use_resource(
   pool: Subject(Message(resource)),
   callback: fn(resource) -> a,
-) -> a {
+) -> Result(a, BasinError(resource)) {
   // Acquire
-  let resource = process.call(pool, Acquire, 10)
+  case process.try_call(pool, Acquire, 10) {
+    Ok(resource) -> {
+      // Use
+      let res = callback(resource)
 
-  // Use
-  let res = callback(resource)
+      // Release
+      process.send(pool, Release(resource))
 
-  // Release
-  process.send(pool, Release(resource))
-
-  res
+      Ok(res)
+    }
+    Error(call_error) -> Error(ProcessCallError(call_error))
+  }
 }
 
-fn create_janitor() {
+fn create_janitor(idle_lifetime, pool) {
   todo
 }
 
