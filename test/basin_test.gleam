@@ -50,7 +50,7 @@ pub fn basin_should_use_single_instance_test() {
   should.equal(resource, SomeResource(3))
 }
 
-pub fn basin_should_dispose_test() {
+pub fn basin_should_dispose_after_callback_test() {
   let test_basin = basin.new(1000, fn() { SomeResource }, function.identity)
 
   let assert Error(basin.ProcessCallError(_)) = {
