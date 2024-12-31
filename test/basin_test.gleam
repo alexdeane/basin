@@ -1,8 +1,5 @@
 import basin
-import gleam/erlang/process
 import gleam/function
-import gleam/io
-import gleam/list
 import gleeunit
 import gleeunit/should
 
@@ -10,73 +7,54 @@ pub fn main() {
   gleeunit.main()
 }
 
-pub fn nested_next_calls_should_create_multiple_instances() {
-  use test_basin <- basin.new(1000, fn() {
-    io.debug("used")
-    Nil
-  })
-
-  let get_resource = fn() {
-    use r <- basin.next(test_basin)
-    r
-  }
-
-  let assert Ok(resource) = get_resource()
-  let assert Ok(resource) = get_resource()
-  let assert Ok(resource) = get_resource()
-
-  Nil
-}
-
-pub fn flat_next_calls_should_reuse_instances() {
-  use test_basin <- basin.new(1000, fn() {
-    io.debug("used")
-    Nil
-  })
-
-  let r1 = basin.next(test_basin, function.identity)
-  let r2 = basin.next(test_basin, function.identity)
-  let r3 = basin.next(test_basin, function.identity)
-
-  Nil
-}
-
 pub type SomeResource {
   SomeResource(Int)
 }
 
-pub fn basin_should_reuse_single_instance() {
-  use test_basin <- basin.new(1000, fn() { SomeResource })
-  use resource <- basin.next(test_basin)
+pub fn flat_next_calls_should_reuse_instances_test() {
+  use test_basin <- basin.new(1000, fn() {
+    // Would like this callback to instead be able to
+    // increment an integer or at least SOMEHOW affect something
+    // stateful in the outer scope that I could leverage to ensure
+    // the initializer fn was only invoked once
+    SomeResource(3)
+  })
 
-  should.equal(resource, SomeResource)
+  let assert Ok(r1) = basin.next(test_basin, function.identity)
+  let assert Ok(r2) = basin.next(test_basin, function.identity)
+  let assert Ok(r3) = basin.next(test_basin, function.identity)
+
+  // This won't work because the value is the same
+  should.not_equal(r1, r2)
+  should.not_equal(r1, r3)
+  should.not_equal(r2, r3)
 }
 
-pub fn basin_should_dispose() {
-  let test_basin = {
-    use test_basin <- basin.new(1000, fn() { SomeResource })
+pub fn nested_next_calls_should_create_multiple_instances_test() {
+  use test_basin <- basin.new(1000, fn() { SomeResource(3) })
 
-    let assert Ok(resource) = {
-      use r <- basin.next(test_basin)
-      r
-    }
-    let assert Ok(resource) = {
-      use r <- basin.next(test_basin)
-      r
-    }
-    let assert Ok(resource) = {
-      use r <- basin.next(test_basin)
-      r
-    }
+  use r1 <- basin.next(test_basin)
+  use r2 <- basin.next(test_basin)
+  use r3 <- basin.next(test_basin)
 
-    test_basin
-  }
+  // This won't work because the value is the same
+  should.not_equal(r1, r2)
+  should.not_equal(r1, r3)
+  should.not_equal(r2, r3)
+}
 
-  let assert Error(basin.ProcessCallError(e)) = {
+pub fn basin_should_use_single_instance_test() {
+  use test_basin <- basin.new(1000, fn() { SomeResource(3) })
+  use resource <- basin.next(test_basin)
+
+  should.equal(resource, SomeResource(3))
+}
+
+pub fn basin_should_dispose_test() {
+  let test_basin = basin.new(1000, fn() { SomeResource }, function.identity)
+
+  let assert Error(basin.ProcessCallError(_)) = {
     use r <- basin.next(test_basin)
     r
   }
-
-  io.debug(e)
-  Nil
 }

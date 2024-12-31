@@ -2,11 +2,10 @@ import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/otp/actor
 
-pub opaque type Basin(resource, a) {
+pub opaque type Basin(resource) {
   Basin(
-    // next: fn(fn(resource) -> a) -> a,
-    pool: Subject(Message(resource)),
-    //  janitor: Subject(JanitorMessage(resource))
+    pool: Subject(PoolMessage(resource)),
+    //  janitor: Subject(JanitorPoolMessage(resource))
   )
 }
 
@@ -19,23 +18,16 @@ type ProvisionedResource(resource) {
   Free(resource)
 }
 
-type Message(resource) {
+type PoolMessage(resource) {
   Shutdown
   Acquire(client: Subject(resource))
   Release(resource: resource)
 }
 
-pub fn next(
-  basin: Basin(resource, a),
-  resource_callback: fn(resource) -> a,
-) -> Result(a, BasinError(resource)) {
-  use_resource(basin.pool, resource_callback)
-}
-
 pub fn new(
   idle_lifetime: Int,
   initializer: fn() -> resource,
-  usage: fn(Basin(resource, b)) -> a,
+  usage: fn(Basin(resource)) -> a,
 ) -> a {
   let assert Ok(pool) = actor.start([], create_pool_handler(initializer))
   // let assert Ok(janitor) = actor.start([], create_janitor(idle_lifetime, pool))
@@ -48,8 +40,15 @@ pub fn new(
   result
 }
 
+pub fn next(
+  basin: Basin(resource),
+  resource_callback: fn(resource) -> a,
+) -> Result(a, BasinError(resource)) {
+  use_resource(basin.pool, resource_callback)
+}
+
 fn use_resource(
-  pool: Subject(Message(resource)),
+  pool: Subject(PoolMessage(resource)),
   callback: fn(resource) -> a,
 ) -> Result(a, BasinError(resource)) {
   // Acquire
@@ -72,8 +71,8 @@ fn create_janitor(idle_lifetime, pool) {
 }
 
 fn create_pool_handler(initializer: fn() -> resource) {
-  fn(message: Message(resource), state: List(ProvisionedResource(resource))) -> actor.Next(
-    Message(resource),
+  fn(message: PoolMessage(resource), state: List(ProvisionedResource(resource))) -> actor.Next(
+    PoolMessage(resource),
     List(ProvisionedResource(resource)),
   ) {
     case message {
@@ -92,7 +91,6 @@ fn create_pool_handler(initializer: fn() -> resource) {
           Error(Nil) -> actor.continue(state)
           Ok(#(pr, rest)) -> {
             let assert Owned(resource, _) = pr
-            // pr.owner.send(Ok(pr.resource))
             actor.continue([Free(resource), ..rest])
           }
         }
